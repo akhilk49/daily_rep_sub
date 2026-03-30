@@ -1,0 +1,43 @@
+name: Daily Form Submission
+
+on:
+  schedule:
+    # Runs Mon-Fri at 5:30 PM IST (12:00 UTC)
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Install dependencies
+        run: pip install groq selenium webdriver-manager python-dotenv
+
+      - name: Run form submission
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_PSID: ${{ secrets.GOOGLE_PSID }}
+          GOOGLE_PSIDCC: ${{ secrets.GOOGLE_PSIDCC }}
+          GOOGLE_PSIDTS: ${{ secrets.GOOGLE_PSIDTS }}
+          GOOGLE_3PSID: ${{ secrets.GOOGLE_3PSID }}
+          GOOGLE_SID: ${{ secrets.GOOGLE_SID }}
+          GOOGLE_HSID: ${{ secrets.GOOGLE_HSID }}
+          GOOGLE_SSID: ${{ secrets.GOOGLE_SSID }}
+          GOOGLE_APISID: ${{ secrets.GOOGLE_APISID }}
+          GOOGLE_SAPISID: ${{ secrets.GOOGLE_SAPISID }}
+          GOOGLE_PAPISID: ${{ secrets.GOOGLE_PAPISID }}
+          GOOGLE_NID: ${{ secrets.GOOGLE_NID }}
+        run: python main.py
