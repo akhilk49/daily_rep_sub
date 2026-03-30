@@ -67,7 +67,7 @@ def submit_form(answers):
         page.wait_for_timeout(1500)
 
         # Click Next
-        page.locator('span:text("Next")').click()
+        page.get_by_role("button", name="Next").click()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(2000)
 
@@ -80,13 +80,13 @@ def submit_form(answers):
 
         # Handle multi-page: keep clicking Next until Submit appears
         for _ in range(3):
-            if page.locator('span:text("Submit")').count() > 0:
+            if page.get_by_role("button", name="Submit").count() > 0:
                 break
-            if page.locator('span:text("Next")').count() > 0:
-                page.locator('span:text("Next")').click()
+            if page.get_by_role("button", name="Next").count() > 0:
+                page.get_by_role("button", name="Next").click()
                 page.wait_for_timeout(2000)
 
-        page.locator('span:text("Submit")').click()
+        page.get_by_role("button", name="Submit").click()
         page.wait_for_timeout(3000)
 
         print("Form submitted successfully!")
