@@ -1,28 +1,24 @@
 import os
+import json
+import base64
 import time
 from dotenv import load_dotenv
 from groq import Groq
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from playwright.sync_api import sync_playwright
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSc8RRUAG8n8nPB9dm21m_MxwHQ-JuDnEj7GnvwEkWXykkKFuQ/viewform"
 
-def get_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,800")
-
-    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+def get_auth_state():
+    # In GitHub Actions, auth is passed as base64 env var
+    auth_b64 = os.getenv("GOOGLE_AUTH_STATE")
+    if auth_b64:
+        auth_data = json.loads(base64.b64decode(auth_b64).decode("utf-8"))
+        with open("auth.json", "w") as f:
+            json.dump(auth_data, f)
+    return "auth.json"
 
 def generate_answers():
     prompt = """You are filling a daily work journal. Generate realistic, concise answers for the following 4 questions:
@@ -41,90 +37,60 @@ Reply with exactly 4 lines, one answer per line, no numbering or labels."""
     return lines
 
 def submit_form(answers):
-    driver = get_driver()
-    wait = WebDriverWait(driver, 20)
+    auth_path = get_auth_state()
 
-    try:
-        # Set cookies on google.com domain
-        driver.get("https://accounts.google.com")
-        time.sleep(2)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(storage_state=auth_path)
+        page = context.new_page()
 
-        cookie_map = {
-            "__Secure-1PSID": os.getenv("GOOGLE_PSID"),
-            "__Secure-1PSIDCC": os.getenv("GOOGLE_PSIDCC"),
-            "__Secure-1PSIDTS": os.getenv("GOOGLE_PSIDTS"),
-            "__Secure-3PSID": os.getenv("GOOGLE_3PSID"),
-            "SID": os.getenv("GOOGLE_SID"),
-            "HSID": os.getenv("GOOGLE_HSID"),
-            "SSID": os.getenv("GOOGLE_SSID"),
-            "APISID": os.getenv("GOOGLE_APISID"),
-            "SAPISID": os.getenv("GOOGLE_SAPISID"),
-            "__Secure-1PAPISID": os.getenv("GOOGLE_PAPISID"),
-            "NID": os.getenv("GOOGLE_NID"),
-        }
+        page.goto(FORM_URL)
+        page.wait_for_load_state("networkidle")
 
-        for name, value in cookie_map.items():
-            if value:
-                try:
-                    driver.add_cookie({"name": name, "value": value, "domain": ".google.com"})
-                except Exception:
-                    pass
-
-        driver.get(FORM_URL)
-        time.sleep(4)
-
-        # Check if we're on the form or sign-in page
-        if "sign" in driver.title.lower():
-            print("Not authenticated — cookies may have expired.")
+        # Check if authenticated
+        if "sign" in page.title().lower():
+            print("Not authenticated — auth session may have expired.")
+            browser.close()
             return
 
         # Check the "Record email" checkbox if unchecked
         try:
-            checkbox = driver.find_element(By.XPATH, '//div[@role="checkbox"]')
+            checkbox = page.locator('[role="checkbox"]').first
             if checkbox.get_attribute("aria-checked") == "false":
                 checkbox.click()
-                time.sleep(1)
+                page.wait_for_timeout(1000)
         except Exception:
             pass
 
         # Radio: "It was a working day, and I was present"
-        radio = wait.until(EC.element_to_be_clickable(
-            (By.XPATH, '//div[@data-value="It was a working day, and I was present"]')
-        ))
-        radio.click()
-        time.sleep(2)
+        page.locator('[data-value="It was a working day, and I was present"]').click()
+        page.wait_for_timeout(1500)
 
         # Click Next
-        next_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//span[text()="Next"]')))
-        next_btn.click()
-        time.sleep(4)
+        page.locator('span:text("Next")').click()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(2000)
 
         # Fill text fields
-        textareas = wait.until(EC.presence_of_all_elements_located((By.XPATH, '//textarea[@class]')))
+        textareas = page.locator("textarea").all()
         for i, textarea in enumerate(textareas[:4]):
-            driver.execute_script("arguments[0].scrollIntoView();", textarea)
             textarea.click()
-            time.sleep(0.3)
-            textarea.send_keys(answers[i])
-            time.sleep(0.5)
+            textarea.fill(answers[i])
+            page.wait_for_timeout(300)
 
         # Handle multi-page: keep clicking Next until Submit appears
         for _ in range(3):
-            btns = [b.text.strip() for b in driver.find_elements(By.XPATH, '//span[contains(@class,"NPEfkd")]')]
-            if "Submit" in btns:
+            if page.locator('span:text("Submit")').count() > 0:
                 break
-            if "Next" in btns:
-                driver.find_element(By.XPATH, '//span[text()="Next"]').click()
-                time.sleep(3)
+            if page.locator('span:text("Next")').count() > 0:
+                page.locator('span:text("Next")').click()
+                page.wait_for_timeout(2000)
 
-        submit_btn = wait.until(EC.element_to_be_clickable((By.XPATH, '//span[text()="Submit"]')))
-        submit_btn.click()
-        time.sleep(3)
+        page.locator('span:text("Submit")').click()
+        page.wait_for_timeout(3000)
 
         print("Form submitted successfully!")
-
-    finally:
-        driver.quit()
+        browser.close()
 
 if __name__ == "__main__":
     answers = generate_answers()
