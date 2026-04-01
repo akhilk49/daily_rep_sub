@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install groq playwright python-dotenv
+        run: pip install groq playwright python-dotenv google-api-python-client google-auth
 
       - name: Install Playwright browsers
         run: python -m playwright install chromium
@@ -26,4 +26,5 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GOOGLE_AUTH_STATE: ${{ secrets.GOOGLE_AUTH_STATE }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: python main.py

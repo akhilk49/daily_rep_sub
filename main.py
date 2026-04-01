@@ -1,13 +1,59 @@
 import os
 import json
 import base64
-import time
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from groq import Groq
 from playwright.sync_api import sync_playwright
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSc8RRUAG8n8nPB9dm21m_MxwHQ-JuDnEj7GnvwEkWXykkKFuQ/viewform"
+CALENDAR_ID = "akhil.k@kalvium.community"
+
+def get_attendance_status():
+    """Check Google Calendar for today's events to determine attendance status."""
+    try:
+        sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+        if not sa_json:
+            print("No service account found, defaulting to present.")
+            return "It was a working day, and I was present"
+
+        sa_info = json.loads(sa_json)
+        creds = service_account.Credentials.from_service_account_info(
+            sa_info,
+            scopes=["https://www.googleapis.com/auth/calendar.readonly"]
+        )
+        service = build("calendar", "v3", credentials=creds)
+
+        today = datetime.now(timezone.utc).date()
+        time_min = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        time_max = datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc).isoformat()
+
+        events = service.events().list(
+            calendarId=CALENDAR_ID,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True
+        ).execute().get("items", [])
+
+        for event in events:
+            title = event.get("summary", "").lower()
+            if "holiday" in title or "campus holiday" in title:
+                print(f"Found holiday event: {event.get('summary')}")
+                return "It was a campus holiday"
+            if "leave" in title or "absent" in title:
+                print(f"Found leave event: {event.get('summary')}")
+                return "It was a working day, but I was on leave or absent"
+
+        return "It was a working day, and I was present"
+
+    except Exception as e:
+        print(f"Calendar check failed: {e}, defaulting to present.")
+        return "It was a working day, and I was present"
 
 FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSc8RRUAG8n8nPB9dm21m_MxwHQ-JuDnEj7GnvwEkWXykkKFuQ/viewform"
 
@@ -62,8 +108,10 @@ def submit_form(answers):
         except Exception:
             pass
 
-        # Radio: "It was a working day, and I was present"
-        page.locator('[data-value="It was a working day, and I was present"]').click()
+        # Radio: select based on calendar status
+        attendance = get_attendance_status()
+        print(f"Attendance status: {attendance}")
+        page.locator(f'[data-value="{attendance}"]').click()
         page.wait_for_timeout(1500)
 
         # Click Next
